@@ -205,6 +205,15 @@
 (define-method irc-send-message-to ((channel <symbol>) (message <irc-message>))
   (irc-server-send-message-to-all-clients (current-irc-server) message))
 
+(define-method irc-send-message-to (to sender (command <symbol>) . params)
+  (irc-send-message-to
+    to
+    (apply
+      make-irc-message
+      (irc-prefix-of (or sender (current-irc-server)))
+      command
+      params)))
+
 ;;
 (define-method write-object ((client <pseudo-irc-server-client>) port)
   (display (irc-prefix-of client) port))
