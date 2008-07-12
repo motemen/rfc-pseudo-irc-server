@@ -3,6 +3,7 @@
   (use srfi-13)
   (use gauche.net)
   (use gauche.selector)
+  (use gauche.parameter)
   (export
     <pseudo-irc-server>
     <pseudo-irc-server-client>
@@ -11,6 +12,7 @@
     irc-server-start
     irc-server-register-callback
     irc-server-register-default-callbacks
+    on-command
     irc-send-message-to-client
     irc-server-send-message-to-all-clients
     irc-server-send-message-to-channel
@@ -18,15 +20,18 @@
     irc-send-notice-to-channel
     irc-send-privmsg-to-client
     irc-send-privmsg-to-channel
+    irc-send-message-to
     irc-prefix-of
     irc-message->string
+    irc-message->params-string
     irc-message-prefix->string
     make-irc-message
     make-irc-message-prefix
+    current-irc-server
     ))
 (select-module rfc.pseudo-irc-server)
 
-;; 疑似IRCサーバ
+;;; 疑似IRCサーバ
 (define-class <pseudo-irc-server> ()
   ((listen-port :init-keyword :listen-port
                 :init-value 6667)
@@ -40,6 +45,12 @@
 
    (name    :init-value "pseudo-irc-server/gauche")
    (version :init-value 0.01)))
+
+(define current-irc-server (make-parameter #f))
+
+(define-method initialize ((self <pseudo-irc-server>) initargs)
+  (current-irc-server self)
+  (next-method))
 
 ;; <pseudo-irc-server> に接続しているクライアント
 (define-class <pseudo-irc-server-client> ()
@@ -77,13 +88,20 @@
       (socket-fd server-socket)
       (pa$ pseudo-irc-server-accept-handler self) '(r))
 
+    (log-info #`"Pseudo IRC server is running port ,(slot-ref self 'listen-port)...")
+
     (do () (#f)
       (selector-select selector '(5 0)))))
+
+(define-method irc-server-start ()
+  (irc-server-start (current-irc-server)))
 
 ;; クライアントの接続
 (define-method pseudo-irc-server-accept-handler ((self <pseudo-irc-server>) sock flag)
   (let* ((client-socket (socket-accept (slot-ref self 'server-socket)))
          (client        (make <pseudo-irc-server-client> :socket client-socket)))
+    (log-info #`"Client ,client has connected.")
+
     (slot-push! self 'clients client)
     (selector-add!
       (slot-ref self 'selector)
@@ -99,8 +117,10 @@
          (line (guard (e (else #f)) (read-line port)))
          ( (not (eof-object? line)) )
          (irc-message (parse-irc-message line)))
+      (log-info #`",client ,line")
       (pseudo-irc-server-handle-callback self client irc-message))
     (begin
+      (log-info #`",client has disconnected.")
       (slot-delete! self 'clients client)
       (selector-delete! (slot-ref self 'selector) port #f #f)
       (socket-close (slot-ref client 'socket)))))
@@ -118,6 +138,16 @@
     (slot-ref self 'callbacks)
     (string->symbol (string-upcase (x->string command)))
     callback))
+
+;; マクロ版
+(define-syntax on-command
+  (syntax-rules (current-irc-server)
+    ((_ command (client message) body ...)
+     (irc-server-register-callback (current-irc-server) 'command
+        (with-module user
+        (lambda (server client message)
+          body ...
+          ))))))
 
 ;; クライアントにメッセージを送信
 (define-method irc-send-message-to-client ((client <pseudo-irc-server-client>) (message <irc-message>))
@@ -139,9 +169,9 @@
 (define-method irc-server-send-message-to-channel ((server <pseudo-irc-server>) channel (message <irc-message>))
   (for-each
     (cut irc-send-message-to-client <> message)
-    (filter (lambda (client) (and (member channel (slot-ref client 'channels))
-                                  (or (not (eq? (slot-ref message 'command) 'PRIVMSG))
-                                      (not (string= (slot-ref (slot-ref message 'prefix) 'nick) (slot-ref client 'nick))))))
+    (filter (lambda (client)
+              (and (member channel (slot-ref client 'channels))
+                   (not (string= (slot-ref (slot-ref message 'prefix) 'nick) (slot-ref client 'nick)))))
             (slot-ref server 'clients))))
 
 (define-method irc-server-send-message-to-channel ((server <pseudo-irc-server>) channel prefix command . params)
@@ -165,6 +195,20 @@
 (define-method irc-send-notice-to-channel ((server <pseudo-irc-server>) sender channel msg)
   (irc-server-send-message-to-channel server channel (irc-prefix-of sender) 'NOTICE channel msg))
 
+;;
+(define-method irc-send-message-to ((client <pseudo-irc-server-client>) (message <irc-message>))
+  (irc-send-message-to-client client message))
+
+(define-method irc-send-message-to ((channel <string>) (message <irc-message>))
+  (irc-server-send-message-to-channel (current-irc-server) channel message))
+
+(define-method irc-send-message-to ((channel <symbol>) (message <irc-message>))
+  (irc-server-send-message-to-all-clients (current-irc-server) message))
+
+;;
+(define-method write-object ((client <pseudo-irc-server-client>) port)
+  (display (irc-prefix-of client) port))
+
 ;;; デフォルトのハンドラ
 (define-method irc-server-register-default-callbacks ((server <pseudo-irc-server>))
   (irc-server-register-callback server 'PASS set-client-password)
@@ -173,7 +217,11 @@
   (irc-server-register-callback server 'USER set-client-user)
   (irc-server-register-callback server 'JOIN join-channel)
   (irc-server-register-callback server 'PART part-channel)
-  (irc-server-register-callback server 'QUIT quit-server))
+  (irc-server-register-callback server 'QUIT quit-server)
+  (irc-server-register-callback server 'EVAL eval-message))
+
+(define-method irc-server-register-default-callbacks ()
+  (irc-server-register-default-callbacks (current-irc-server)))
 
 ;; password スロットを更新
 (define-method set-client-password ((server <pseudo-irc-server>) (client <pseudo-irc-server-client>) (message <irc-message>))
@@ -218,6 +266,12 @@
   (slot-delete! server 'clients client)
   (selector-delete! (slot-ref server 'selector) (socket-input-port (slot-ref client 'socket)) #f #f)
   (socket-close (slot-ref client 'socket)))
+
+;; EVAL
+(define-method eval-message ((server <pseudo-irc-server>) (client <pseudo-irc-server-client>) (message <irc-message>))
+  (let1 result (guard (e (else e))
+                 (eval (call-with-input-string (irc-message->params-string message) read) (current-module)))
+    (irc-send-notice-to-client server client result)))
 
 ;; prefix
 (define-method irc-prefix-of ((server <pseudo-irc-server>))
@@ -267,8 +321,14 @@
         :user user
         :host host))
 
+(define-method object-apply ((client <pseudo-irc-server-client>) command params)
+  (make-irc-message (irc-prefix-of client) command params))
+
 (define-method irc-message-prefix->string ((prefix <irc-message-prefix>))
   #`",(slot-ref prefix 'nick)!,(slot-ref prefix 'user)@,(slot-ref prefix 'host)")
+
+(define-method write-object ((prefix <irc-message-prefix>) port)
+  (display (irc-message-prefix->string prefix) port))
 
 (define (split-irc-message-params raw-params)
   (rxmatch-let (#/^(.*?)( :(.*))?$/ raw-params)
@@ -288,8 +348,13 @@
                    (string-join `(,@(map x->string (drop-right params 1)) ,#`":,(last params)") " " 'prefix)))
       (if prefix #`":,(irc-message-prefix->string prefix) ,line" line))))
 
+(define-method irc-message->params-string ((message <irc-message>))
+  (string-join (ref message 'params)))
+
 ;;; ユーティリティ
 (define (slot-delete! obj slot x)
   (slot-set! obj slot (delete x (slot-ref obj slot))))
+
+(define log-info print)
 
 (provide "rfc/pseudo-irc-server")
