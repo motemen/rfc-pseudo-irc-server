@@ -12,7 +12,7 @@
     irc-server-start
     irc-server-register-callback
     irc-server-register-default-callbacks
-    on-command
+    irc-on-command
     irc-send-message-to-client
     irc-server-send-message-to-all-clients
     irc-server-send-message-to-channel
@@ -140,14 +140,23 @@
     callback))
 
 ;; マクロ版
-(define-syntax on-command
+(define-syntax irc-on-command
   (syntax-rules (current-irc-server)
-    ((_ command (client message) body ...)
+    ((_ command (param ...) body ...)
      (irc-server-register-callback (current-irc-server) 'command
-        (with-module user
-        (lambda (server client message)
-          body ...
-          ))))))
+       (lambda (_ client message)
+         (apply* (lambda (param ...) body ...) (ref message 'params)))))
+    ((_ command () body ...)
+     (irc-server-register-callback (current-irc-server) 'command
+       (lambda (_ client message)
+         body ...)))))
+
+(define (apply* proc . args)
+  (let ((ar (arity proc))
+        (args (apply cons* args)))
+    (if (arity-at-least? ar)
+      (apply proc args)
+      (apply proc (take (append args (circular-list #f)) ar)))))
 
 ;; クライアントにメッセージを送信
 (define-method irc-send-message-to-client ((client <pseudo-irc-server-client>) (message <irc-message>))

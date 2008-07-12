@@ -6,7 +6,7 @@ SYNOPSIS
     (irc-server-register-default-callbacks)
 
     ; Make any users join a channel on login.
-    (on-command USER (client message)
+    (irc-on-command USER (client message)
       (irc-send-message-to client (client 'JOIN "#default-room")))
 
     ; Start IRC server.
@@ -64,7 +64,7 @@ Send `message` to all clients.
 ---------------------
 Send message composed of `sender`, `command` and `params` to `client-or-channel-or-all`. If `sender` is `#f`, `(current-irc-server)` is used.
 
-`(on-command command (client message) body ...)`
+`(irc-on-command command (param ...) body ...)`
 ------------------------------------------------
 `(irc-server-register-callback server command callback`
 -------------------------------------------------------
