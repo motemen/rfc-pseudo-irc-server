@@ -1,15 +1,21 @@
 SYNOPSIS
 ========
+    (use rfc.pseudo-irc-server)
+
     (make <pseudo-irc-server>) ; server is stored in parameter (current-irc-server) automatically
 
-    ; Register callbacks needed for the server to work properly.
+    ; register callbacks needed for the server to work properly.
     (irc-server-register-default-callbacks)
 
-    ; Make any users join a channel on login.
-    (irc-on-command USER (client message)
+    ; make any users join a channel on login.
+    (irc-on-command USER (client)
       (irc-send-message-to client (client 'JOIN "#default-room")))
 
-    ; Start IRC server.
+    ; show welcome message on channel join.
+    (irc-on-command JOIN (client channel)
+      (irc-send-message-to channel ((current-irc-server) 'NOTICE channel #`"welcome to ,channel, ,(ref client 'nick)")))
+
+    ; start IRC server.
     (irc-server-start)
 
 EXPORTED FUNCTIONS

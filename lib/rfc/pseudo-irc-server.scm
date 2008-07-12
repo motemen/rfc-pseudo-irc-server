@@ -21,6 +21,8 @@
     irc-send-privmsg-to-client
     irc-send-privmsg-to-channel
     irc-send-message-to
+    irc-privmsg-to
+    irc-notice-to
     irc-prefix-of
     irc-message->string
     irc-message->params-string
@@ -43,14 +45,14 @@
    (server-socket)
    (selector)
 
-   (name    :init-value "pseudo-irc-server/gauche")
+   (name    :init-value "pseudo-irc-server/gauche" :init-keyword :name)
    (version :init-value 0.01)))
 
 (define current-irc-server (make-parameter #f))
 
 (define-method initialize ((self <pseudo-irc-server>) initargs)
-  (current-irc-server self)
-  (next-method))
+  (next-method)
+  (current-irc-server self))
 
 ;; <pseudo-irc-server> に接続しているクライアント
 (define-class <pseudo-irc-server-client> ()
@@ -142,14 +144,19 @@
 ;; マクロ版
 (define-syntax irc-on-command
   (syntax-rules (current-irc-server)
-    ((_ command (param ...) body ...)
+    ((_ command (?param ...) ?body ...)
      (irc-server-register-callback (current-irc-server) 'command
        (lambda (_ client message)
-         (apply* (lambda (param ...) body ...) (ref message 'params)))))
-    ((_ command () body ...)
+         (apply* (lambda (?param ...) ?body ...) client (ref message 'params)))))
+    ((_ command () ?body ...)
      (irc-server-register-callback (current-irc-server) 'command
        (lambda (_ client message)
-         body ...)))))
+         ?body ...)))
+    ((_ command ?params ?body ...)
+     (irc-server-register-callback (current-irc-server) 'command
+       (lambda (_ client message)
+         (apply (lambda ?params ?body ...) client (ref message 'params)))))
+    ))
 
 (define (apply* proc . args)
   (let ((ar (arity proc))
@@ -223,6 +230,36 @@
       command
       params)))
 
+(define-method irc-privmsg-to ((channel <string>) (sender <irc-message-prefix>) (privmsg <string>))
+  (irc-server-send-message-to-channel
+    (current-irc-server)
+    channel
+    (make <irc-message>
+          :prefix sender
+          :command 'PRIVMSG
+          :params `(,channel ,privmsg))))
+
+(define-method irc-privmsg-to ((channel <string>) (nick <string>) (privmsg <string>))
+  (irc-privmsg-to
+    channel
+    (make-irc-message-prefix nick "user" (slot-ref (irc-prefix-of (current-irc-server)) 'host))
+    privmsg))
+
+(define-method irc-notice-to ((channel <string>) (sender <irc-message-prefix>) (notice <string>))
+  (irc-server-send-message-to-channel
+    (current-irc-server)
+    channel
+    (make <irc-message>
+          :prefix sender
+          :command 'NOTICE
+          :params `(,channel ,notice))))
+
+(define-method irc-notice-to ((channel <string>) (nick <string>) (notice <string>))
+  (irc-notice-to
+    channel
+    (make-irc-message-prefix nick "user" (slot-ref (irc-prefix-of (current-irc-server)) 'host))
+    notice))
+
 ;;
 (define-method write-object ((client <pseudo-irc-server-client>) port)
   (display (irc-prefix-of client) port))
@@ -235,8 +272,7 @@
   (irc-server-register-callback server 'USER set-client-user)
   (irc-server-register-callback server 'JOIN join-channel)
   (irc-server-register-callback server 'PART part-channel)
-  (irc-server-register-callback server 'QUIT quit-server)
-  (irc-server-register-callback server 'EVAL eval-message))
+  (irc-server-register-callback server 'QUIT quit-server))
 
 (define-method irc-server-register-default-callbacks ()
   (irc-server-register-default-callbacks (current-irc-server)))
@@ -293,10 +329,11 @@
 
 ;; prefix
 (define-method irc-prefix-of ((server <pseudo-irc-server>))
-  (make <irc-message-prefix>
-        :nick (slot-ref server 'name)
-        :user "localhost"
-        :host "localhost"))
+  (let1 addr (sockaddr-addr (socket-address (slot-ref server 'server-socket)))
+    (make <irc-message-prefix>
+          :nick (slot-ref server 'name)
+          :user "localhost"
+          :host (inet-address->string addr AF_INET))))
 
 (define-method irc-prefix-of ((client <pseudo-irc-server-client>))
   (let1 addr (sockaddr-addr (socket-address (slot-ref client 'socket)))
@@ -339,8 +376,11 @@
         :user user
         :host host))
 
-(define-method object-apply ((client <pseudo-irc-server-client>) command params)
-  (make-irc-message (irc-prefix-of client) command params))
+(define-method object-apply ((server <pseudo-irc-server>) command . params)
+  (apply make-irc-message (irc-prefix-of server) command params))
+
+(define-method object-apply ((client <pseudo-irc-server-client>) command . params)
+  (apply make-irc-message (irc-prefix-of client) command params))
 
 (define-method irc-message-prefix->string ((prefix <irc-message-prefix>))
   #`",(slot-ref prefix 'nick)!,(slot-ref prefix 'user)@,(slot-ref prefix 'host)")
