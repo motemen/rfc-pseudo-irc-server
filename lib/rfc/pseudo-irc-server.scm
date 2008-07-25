@@ -64,7 +64,7 @@
 
 ;; IRCメッセージ
 (define-class <irc-message> ()
-  ((prefix  :init-keyword :prefix)   ; コマンドのプレフィックス <irc-command-prefix> または #f
+  ((prefix  :init-keyword :prefix)   ; コマンドのプレフィックス <irc-message-prefix> または #f
    (command :init-keyword :command)  ; コマンド名
    (params  :init-keyword :params))) ; パラメータのリスト
 
@@ -234,35 +234,49 @@
   (irc-server-send-message-to-channel
     (current-irc-server)
     channel
-    (make <irc-message>
-          :prefix sender
-          :command 'PRIVMSG
-          :params `(,channel ,privmsg))))
+    (make-irc-message
+      sender
+      'PRIVMSG
+      channel
+      privmsg)))
 
-(define-method irc-privmsg-to ((channel <string>) (nick <string>) (privmsg <string>))
-  (irc-privmsg-to
-    channel
-    (make-irc-message-prefix nick "user" (slot-ref (irc-prefix-of (current-irc-server)) 'host))
-    privmsg))
+(define-method irc-privmsg-to ((client <pseudo-irc-server-client>) (sender <irc-message-prefix>) (privmsg <string>))
+  (irc-send-message-to-client
+    client
+    (make-irc-message
+      sender
+      'PRIVMSG
+      channel
+      privmsg)))
+
+(define-method irc-privmsg-to (channel-or-client sender (privmsg <string>))
+  (irc-privmsg-to channel-or-client (irc-prefix-of sender) privmsg))
+
+(define-method irc-notice-to ((client <pseudo-irc-server-client>) (sender <irc-message-prefix>) (notice <string>))
+  (irc-send-message-to-client
+    client
+    (make-irc-message
+      sender
+      'NOTICE
+      channel
+      notice)))
 
 (define-method irc-notice-to ((channel <string>) (sender <irc-message-prefix>) (notice <string>))
   (irc-server-send-message-to-channel
     (current-irc-server)
     channel
-    (make <irc-message>
-          :prefix sender
-          :command 'NOTICE
-          :params `(,channel ,notice))))
+    (make-irc-message
+      sender
+      'NOTICE
+      channel
+      notice)))
 
-(define-method irc-notice-to ((channel <string>) (nick <string>) (notice <string>))
-  (irc-notice-to
-    channel
-    (make-irc-message-prefix nick "user" (slot-ref (irc-prefix-of (current-irc-server)) 'host))
-    notice))
+(define-method irc-notice-to (channel-or-client sender (notice <string>))
+  (irc-notice-to channel-or-client (irc-prefix-of sender) notice))
 
 ;;
 (define-method write-object ((client <pseudo-irc-server-client>) port)
-  (display (irc-prefix-of client) port))
+  (display #`"<pseudo-irc-server-client ,(irc-message-prefix->string (irc-prefix-of client))>" port))
 
 ;;; デフォルトのハンドラ
 (define-method irc-server-register-default-callbacks ((server <pseudo-irc-server>))
@@ -342,9 +356,15 @@
           :user (slot-ref client 'user)
           :host (inet-address->string addr AF_INET))))
 
-(define-method irc-prefix-of ((string <string>))
-  (or (parse-irc-message-prefix string)
-      (parse-irc-message-prefix #`",|string|!pseudo@localhost")))
+(define-method irc-prefix-of ((nick <string>))
+  (or (parse-irc-message-prefix nick)
+      (parse-irc-message-prefix #`",|nick|!pseudo@localhost")))
+
+(define-method irc-prefix-of ((message <irc-message>))
+  (slot-ref message 'prefix))
+
+(define-method irc-prefix-of (_)
+  (irc-prefix-of (current-irc-server)))
 
 ;;; IRCコマンドの解析
 (define (parse-irc-message raw-line)
@@ -386,7 +406,7 @@
   #`",(slot-ref prefix 'nick)!,(slot-ref prefix 'user)@,(slot-ref prefix 'host)")
 
 (define-method write-object ((prefix <irc-message-prefix>) port)
-  (display (irc-message-prefix->string prefix) port))
+  (display #`"<irc-message-prefix ,(irc-message-prefix->string prefix)>" port))
 
 (define (split-irc-message-params raw-params)
   (rxmatch-let (#/^(.*?)( :(.*))?$/ raw-params)
