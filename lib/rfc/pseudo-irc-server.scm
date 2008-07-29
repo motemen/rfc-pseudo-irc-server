@@ -258,7 +258,7 @@
     (make-irc-message
       sender
       'NOTICE
-      channel
+      client
       notice)))
 
 (define-method irc-notice-to ((channel <string>) (sender <irc-message-prefix>) (notice <string>))
@@ -276,7 +276,7 @@
 
 ;;
 (define-method write-object ((client <pseudo-irc-server-client>) port)
-  (display #`"<pseudo-irc-server-client ,(irc-message-prefix->string (irc-prefix-of client))>" port))
+  (display (irc-message-prefix->string (irc-prefix-of client)) port))
 
 ;;; デフォルトのハンドラ
 (define-method irc-server-register-default-callbacks ((server <pseudo-irc-server>))
@@ -406,7 +406,7 @@
   #`",(slot-ref prefix 'nick)!,(slot-ref prefix 'user)@,(slot-ref prefix 'host)")
 
 (define-method write-object ((prefix <irc-message-prefix>) port)
-  (display #`"<irc-message-prefix ,(irc-message-prefix->string prefix)>" port))
+  (display (irc-message-prefix->string prefix) port))
 
 (define (split-irc-message-params raw-params)
   (rxmatch-let (#/^(.*?)( :(.*))?$/ raw-params)
