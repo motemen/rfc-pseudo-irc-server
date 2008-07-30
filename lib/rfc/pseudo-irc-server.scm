@@ -119,7 +119,6 @@
          (line (guard (e (else #f)) (read-line port)))
          ( (not (eof-object? line)) )
          (irc-message (parse-irc-message line)))
-      (log-info #`",client ,line")
       (pseudo-irc-server-handle-callback self client irc-message))
     (begin
       (log-info #`",client has disconnected.")
@@ -433,6 +432,8 @@
 (define (slot-delete! obj slot x)
   (slot-set! obj slot (delete x (slot-ref obj slot))))
 
-(define log-info print)
+(define (log-info log)
+  (display log (current-error-port))
+  (newline (current-error-port)))
 
 (provide "rfc/pseudo-irc-server")
