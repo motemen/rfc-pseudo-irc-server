@@ -245,7 +245,6 @@
     (make-irc-message
       sender
       'PRIVMSG
-      channel
       privmsg)))
 
 (define-method irc-privmsg-to (channel-or-client sender (privmsg <string>))
@@ -257,7 +256,6 @@
     (make-irc-message
       sender
       'NOTICE
-      client
       notice)))
 
 (define-method irc-notice-to ((channel <string>) (sender <irc-message-prefix>) (notice <string>))
